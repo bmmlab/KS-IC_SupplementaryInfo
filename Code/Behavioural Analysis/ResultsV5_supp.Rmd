@@ -1,0 +1,1489 @@
+---
+title: "Behavioural Results"
+author: "J. Pablo Franco, Nitin Yadav, Peter Bossaerts, Carsten Murawski"
+date: "`r format(Sys.time(), '%d %B, %Y')`"#"08/11/2017"
+output: 
+  html_document: 
+    number_sections: yes
+    theme: united
+    toc: yes
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+#For supplmentary material version "other results" were removed and decInstanceInfoAll was commented
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  min-width: 50%;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+</style>
+
+```{r, collapse=TRUE}
+## Setting up the basics
+library(ggplot2)
+library(lme4)
+library(stargazer)
+library(knitr)
+library(ggsignif)
+library(plotrix)
+folder = "~/Google Drive/Melbourne/UNIMELB/Research/Complexity Project/KS-IC/Code/Behavioural-Analysis"
+setwd(folder)
+knitr::opts_knit$set(root.dir = folder)
+
+#Input Parameters
+source(paste0(folder,"/Input/Behav_IC/V1.R"))
+
+#Import functions
+source("DescriptiveFunctions.R")
+
+#Output type for tables. Use "html" to view the output .html file and use "latex" to export .tex tables
+outputType="html"
+
+```
+
+```{r} 
+
+#Stores a list of all the regressions that are run
+allModels=vector("list", length=0)
+
+#' Create the formatted table for statistical model export
+#' 
+#' @param model model to be exported
+#' @param title Caption shown aththe top of the table
+#' @param outputType "html" or "latex"
+#' @param outputName The name of the output file
+#'
+#' @return The text of the table
+#' @export table Exports tables if outputType==Latex
+modelTableStyle = function(model,title,outputType,outputName){
+  print(outputName)
+  # Stores the model in the list with all the models
+  allModels[[outputName]]<<-model
+  if (outputType=="html"){
+      table = stargazer(model, type=outputType, report=('vc*sp'),#(('vc*p'))
+                        column.labels=c("Random Intercept"), dep.var.caption = title, 
+                        dep.var.labels.include = TRUE,model.names=FALSE, 
+                        align=TRUE, column.sep.width = "5000pt") 
+  } else if (outputType=="latex"){
+          table = stargazer(model, type=outputType, report=('vc*sp'),
+                            column.labels=c("Random Intercept"), dep.var.caption = title, 
+                            dep.var.labels.include = TRUE,model.names=FALSE, align=TRUE, 
+                            column.sep.width = "0pt", 
+                            out = paste0("Output/Tables/",outputName,".tex"),table.placement="H")  
+  }
+  #return(table)
+}
+
+#' Exports the formatted plot as pdf for report
+#' @param plot The ggplot to be exported
+#' @param outputName The name of the output file
+#'
+#' @return 
+#' @export plot formatted plot as pdf 
+plotExport = function(plot,outputName){
+  print(outputName)
+  print(plot)
+  path = "/Output/Figures/"
+  print(folder)
+  #folder="~/Google Drive/Melbourne/UNIMELB/Research/Complexity Project/KS-IC/Code/Behavioural-Analysis"
+  pdf(file=paste0(folder,path,outputName,".pdf"))
+  print(plot)
+  dev.off()
+}
+
+#' Export non-regression-based table to html or latex using Pander
+#'
+#' @param table The table to be formated
+#' @param title Caption shown ath the top of the table
+#' @param outputType html" or "latex"
+#' @param outputName The name of the output file
+#'
+#' @return The formatted text of the table
+#' @export table Exports tables if outputType==Latex
+exportTable = function(table,title,outputType,outputName){
+  print(outputName)
+  if (outputType=="html"){
+      table = stargazer(table, type=outputType, dep.var.caption = title, align=TRUE,
+                        column.sep.width = "5000pt",summary=FALSE,rownames = FALSE)  
+  } else if (outputType=="latex"){
+          table = stargazer(table, type=outputType, dep.var.caption = title, align=TRUE,
+                            column.sep.width = "0pt",
+                            out = paste0("Output/Tables/",outputName,".tex"), 
+                            table.placement="H",
+                          summary=FALSE,rownames = FALSE)  
+  }
+}
+
+```
+
+# Knapsack Decision Variant
+
+```{r}
+#Imports Decision Data
+dataAllDec = importTrialInfo(folderDataDec,"dec")
+
+#Adds Phase Transition Dummy Variable to data (1-> in Phase Transition / 0 -> Out of Phase Transition)
+dataAllDec$phaseT=as.numeric(dataAllDec$type<=4)
+
+#Adds an experiment version column to the data based on "Participants Log.csv"
+partLog0=read.csv(fileParticipants, stringsAsFactors = FALSE)
+partLog=data.frame(pID=partLog0$Participant.ID, ExpVersion=partLog0$Experiment.Version,stringsAsFactors = FALSE)
+dataAllDec=merge(dataAllDec,partLog, by="pID" )
+
+#Filters to get only the relevant versions
+dataAllDec=dplyr::filter(dataAllDec,ExpVersion %in% versions)
+
+#Imports Algorithm-specific complexity measures (MZN porpagations and SAT decisions)
+decisionInstanceInfo= read.csv(fileDecInstances, sep=",", stringsAsFactors = FALSE)
+names(decisionInstanceInfo)[names(decisionInstanceInfo)=="propagations_MZN"]="propagations"
+names(decisionInstanceInfo)[names(decisionInstanceInfo)=="decisions_SAT"]="decisions"
+names(decisionInstanceInfo)[names(decisionInstanceInfo)=="problem"]="id"
+decisionInstanceInfo=decisionInstanceInfo[,c('id','propagations','decisions')]
+
+#Imports Algorithm-specific complexity measures (All instances with MZN(Gecode))
+#decInstanceInfoAll = read.csv(fileDecInstancesAll, sep=",", stringsAsFactors = FALSE)
+
+#Generates DataDecProp:= Decision data including expost complexity measures
+dataDecProp=merge(dataAllDec,decisionInstanceInfo, by="id")
+
+# Cleaning Decsion Data:
+# Filters out those trials in which an answer was not given
+nOmitTrials = length(dataDecProp$answer[dataDecProp$answer==2])
+NOmitPart= length(dataDecProp$pID[dataDecProp$answer==2])
+dataDecProp=dataDecProp %>% filter(answer!=2)
+print(paste(nOmitTrials,"Trials were omitted due to non-answers (from", NOmitPart,"Participants)."))
+
+#Filter additional participants.
+#Filter paticipant with 55% accuracy?
+participantsToOmit=c()#c("be16")
+dataDecProp = dataDecProp %>% filter(!(pID %in% participantsToOmit))
+print(paste0(length(participantsToOmit)," participants were omitted in the decision analysis."))
+
+#Adds sum of weights and sum of values 
+dataDecProp=addSumOfValues(dataDecProp)
+dataDecProp=addSumOfWeights(dataDecProp)
+
+names(dataDecProp)[names(dataDecProp)=="timeSpentAprox"]="timeSpent"
+summaryListDec= summaryData(dataDecProp)
+
+```
+
+## Descriptive Summary
+```{r}
+print(paste('Participants To be analysed are:',paste(sort(unique(dataDecProp$pID)),collapse=" ")))
+print(paste('Number of participants to analyse :',length(unique(dataDecProp$pID)) ) )
+print(paste("The overall Accuracy was: ",mean(dataDecProp$correct)))
+```
+
+```{r, results='asis'}
+#Summary Stats for Decision Problem
+dataInput=dataDecProp
+
+accuracySummary = dataInput %>% group_by(pID) %>% summarise(acc=mean(correct)) %>% summarise(mean=mean(acc),min=min(acc),max=max(acc),SD=sd(acc))
+kable(accuracySummary, digits=2, caption = "Accuracy Summary")
+
+answerSummary = dataInput %>% group_by(pID) %>% summarise(acc=mean(answer)) %>% summarise(mean=mean(acc),min=min(acc),max=max(acc),SD=sd(acc))
+kable(answerSummary, digits=2, caption = "Proportion of times that YES was selected as the answer")
+
+yesNoProportions = dataInput %>% group_by(sol,pID) %>% summarise(acc=mean(correct)) %>% summarise(mean=mean(acc),min=min(acc),max=max(acc),SD=sd(acc))
+kable(yesNoProportions, digits=2, caption = "Accuracy By Solution")
+
+```
+
+### Effect of Trial number on accuracy (Computational Performance)
+```{r, results='asis'}
+#Trial (experience effect) effect
+
+#Summary
+summaryByBlock = dataInput %>% group_by(block,pID) %>% summarise(acc=mean(correct)) %>% summarise(mean=mean(acc),min=min(acc),max=max(acc),SD=sd(acc))
+kable(summaryByBlock, digits=2, caption = "Accuracy By Block Number")
+
+#Regresssion
+dataInput=dataDecProp
+dataInput$totalTrial = dataInput$block * dataInput$trial
+
+logitRandomIntercept = glmer(correct ~ totalTrial+ (1|pID), family=binomial(link="logit"), data=dataInput)
+
+#logitRandomInterceptSlope = glmer(correct ~ totalTrial + (1|pID) + (totalTrial|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName='dec01r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+## In and Out of Phase Transition Contrast
+### Accuracy Contrast (Computational Performance)
+```{r , fig.align='center'}
+dataInput=dataDecProp %>% group_by(phaseT,pID)%>%summarise(accuracy1=mean(correct))%>%ungroup()%>%group_by(phaseT)%>%summarise(accuracy=mean(accuracy1),se=se(accuracy1))%>%ungroup()
+
+dataInput$phaseT = recode(dataInput$phaseT, '0' = "Low IC", '1' = "High IC")
+
+plo= ggplot(data=dataInput, aes(y=accuracy, x=as.factor(phaseT),label = round(accuracy,digits = 2))) +
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin=accuracy-se, ymax=accuracy+se), width=.1)+
+  geom_signif(comparisons = list(c("Low IC","High IC")), annotations="***", y_position = 0.95, tip_length = 0.03)+
+  labs(title="Accuracy In and Out of phase Transition",x="Instance complexity",y="Accuracy")+
+  coord_cartesian(ylim = c(0.5,1))+
+  geom_text(hjust=0.5,vjust = 5, colour="white") +
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))
+
+outputName = "dec02g"
+plotExport(plo,outputName)
+
+```
+
+```{r, results='asis'}
+#Anova contrast for In/Out Phase transition
+anovaModel=aov(correct~phaseT+Error(pID/phaseT),dataDecProp)
+anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+rm(dataInput)
+```
+
+```{r, results='asis'}
+#Logistic Regression for In/Out Phase transition
+
+#logistic with random effects (intercept)
+logitRandomIntercept = glmer(correct ~ phaseT + (1|pID), family=binomial(link="logit"), data=dataDecProp)
+
+title="Logistic regressions"
+tableName='dec02r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+### Solvability and Phase Transition
+
+#### Is Phase Transition is still significant regardless of the instance being solvable or not?
+```{r , fig.align='center'}
+
+dataInput=dataDecProp %>% group_by(phaseT,sol,pID)%>%summarise(accuracy1=mean(correct))%>%ungroup()%>%group_by(sol,phaseT)%>%summarise(accuracy=mean(accuracy1),se=se(accuracy1))%>%ungroup()
+
+sol_names <- c(
+                    `0` = "Correct answer: NO",
+                    `1` = "Correct answer: YES",
+                    `2` = "If this is here it means data not filtered"
+                    )
+
+plo=ggplot(data=dataInput, aes(y=accuracy, x=as.factor(as.logical(phaseT)), label = round(accuracy,digits = 2),group=1)) +
+  geom_line()+
+  geom_errorbar(aes(ymin=accuracy-se, ymax=accuracy+se), width=.1) +
+  geom_point(shape=21, size=3, fill="white")+
+  labs(title="Accuracy segregated by solvanbility",x="In Phase Transition?",y="Accuracy")+
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle=0,hjust=0.5))+
+  geom_text(hjust=-0.5, colour="black")+
+  facet_grid(.~sol, labeller = as_labeller(sol_names))
+
+outputName = "dec03g"
+plotExport(plo,outputName)
+```
+
+```{r, results='asis'}
+
+#logistic with random effects (intercept)
+logitRandomIntercept = glmer(correct ~ phaseT + sol + phaseT:sol + (1|pID), family=binomial(link="logit"), data=dataDecProp)
+
+title="Logistic regressions"
+tableName='dec03r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+### Phase Transition effect by Region (Over-Under-InPT)
+#### Is Phase Transition is significant irregardless of region (OverConstrained/Underconstrained)?
+```{r , fig.align='center'}
+dataInput=dataDecProp %>% mutate(region=recode(type, `1`= 'Phase Transition', `2`= 'Phase Transition', `3`= 'Phase Transition', `4`='Phase Transition', '5'='Overconstrained', '6'='Underconstrained'))
+
+dataInput2=dataInput %>% group_by(region,pID)%>%summarise(accuracy1=mean(correct))%>%ungroup()%>%group_by(region)%>%summarise(accuracy=mean(accuracy1),se=se(accuracy1))%>%ungroup()
+
+dataInput2$region <- factor(dataInput2$region, levels = c('Underconstrained',
+                                                          'Phase Transition',
+                                                          'Overconstrained'))
+
+plo= ggplot(data=dataInput2, aes(y=accuracy, x=region, label = round(accuracy,digits = 2))) +
+  geom_bar(stat = "identity")+
+  geom_signif(annotations = c("***","***"),
+              y_position=c(0.95,0.95),xmin=c(1.1,2.1),xmax=c(1.9,2.9))+
+  geom_signif(comparisons = list(c("Underconstrained","Overconstrained")),
+               annotations="NS", y_position = 0.99, tip_length = 0.03)+
+  geom_errorbar(aes(ymin=accuracy-se, ymax=accuracy+se), width=.1)+
+  # geom_signif(comparisons = list(c("Phase Transition","Overconstrained")),
+  #             annotations="***", y_position = 0.98, tip_length = 0.05)+
+  #   geom_signif(comparisons = list(c("Phase Transition","Underconstrained")),
+  #             annotations="***", y_position = 0.96, tip_length = 0.05,size=0.4)+
+  labs(title="Accuracy by region",x="Region",y="Accuracy")+
+  coord_cartesian(ylim = c(0.5,1))+
+  geom_text(hjust=0.5,vjust = 5, colour="white") +
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))
+
+outputName = "decB01g"
+plotExport(plo,outputName)
+
+
+#Stats test for time in and out of phase transition: ANOVA
+dataInput$overConstrained= (dataInput$region=='Overconstrained')
+dataInput$underConstrained= (dataInput$region=='Underconstrained')
+
+
+# print("Anova between Overconstrained and Underconstrained")
+# anovaModel=aov(correct~overConstrained+Error(pID/overConstrained),dataInput %>% filter(overConstrained | underConstrained))
+# anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+# print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+# 
+# print("Anova between Overconstrained and In-PhaseT")
+# anovaModel=aov(correct~phaseT+Error(pID/phaseT),dataInput %>% filter(overConstrained | phaseT))
+# anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+# print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+# 
+# print("Anova between Underconstrained and In-PhaseT")
+# anovaModel=aov(correct~phaseT+Error(pID/phaseT),dataInput %>% filter(underConstrained | phaseT))
+# anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+# print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+```
+
+```{r, results='asis'}
+
+logitRandomIntercept = glmer(correct ~ overConstrained + underConstrained + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName="decB01r1"
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+rm(logit)
+
+```
+
+```{r, results='asis'}
+
+logitRandomIntercept = glmer(correct ~ overConstrained + phaseT + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName="decB01r2"
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+rm(logit)
+
+```
+
+
+## MZN Propagations and accuracy (Computational Performance)
+```{r, fig.align='center'}
+#MZN Propagations
+groups4=dataDecProp  %>% group_by(propagations)
+dat4=summarise(groups4, accuracy=mean(correct), se=se(correct))
+
+plo = ggplot(data=dat4, aes(y=accuracy, x=propagations)) +
+  geom_point()+
+  labs(title="Accuracy and MZN",y="Accuracy",x="MZN Complexity Measure (Propagations)")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #geom_smooth(method = lm)+
+  #stat_smooth(method = glm, method.args = list(family=binomial(link="logit")))+
+  stat_smooth(method = glm)+
+  geom_hline(aes(yintercept=0.5), colour="#990000", linetype="dashed")
+
+outputName = "dec04g"
+plotExport(plo,outputName)
+
+```
+
+```{r, results='asis'}
+
+logitRandomIntercept = glmer(correct ~ scale(propagations) + (1|pID), family=binomial(link="logit"), data=dataDecProp)
+#summary(logitRandomInterceptSlope)
+
+title="Logistic regressions"
+tableName='dec04r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+rm(logit2)
+
+```
+
+## SAT Decisions and Accuracy (Computational Performance)
+```{r, fig.align='center'}
+groups5=dataDecProp %>% group_by(decisions)
+dat5=summarise(groups5, accuracy=mean(correct), se=se(correct))
+
+plo = ggplot(data=dat5, aes(y=accuracy, x=decisions)) +
+  geom_point()+
+  labs(title="Accuracy and SAT Solver",y="Accuracy",x="SAT Complexity Measure (Decisions)")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #stat_smooth(method = glm, method.args = list(family=binomial(link="logit")))+
+  geom_smooth(method = glm) +
+  coord_cartesian(ylim = c(0.50,1.00)) 
+
+outputName = "dec05g"
+plotExport(plo,outputName)
+```
+
+```{r, results='asis' }
+
+logitRandomIntercept = glmer(correct ~ decisions + (1|pID), family=binomial(link="logit"), data=dataDecProp)
+
+title="Logistic regressions"
+tableName='dec05r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+## Number of Solutions that satisfy the Constraints and Accuracy (Computational Performance)
+```{r, fig.align='center'}
+dataInput=dataDecProp
+dataInput=nSolutions(dataInput)
+
+#Plots nSolutions (x) vs. Accuracy (y)
+dataInput3 = dataInput %>% group_by(nSolutions,pID,phaseT)%>%summarise(accuracyMeans=mean(correct))%>%ungroup()%>%group_by(nSolutions,phaseT)%>%summarise(accuracy=mean(accuracyMeans),se=se(accuracyMeans))%>%ungroup()
+
+dataInput3$sol = dataInput3$nSolutions>=1
+dataInput3$phaseT = recode(dataInput3$phaseT, '0' = "Low IC", '1' = "High IC")
+
+plo= ggplot(data=dataInput3, aes(y=accuracy, x=as.factor(nSolutions))) +
+  geom_errorbar(aes(ymin=accuracy-se, ymax=accuracy+se), width=.1)+
+  geom_point(shape=23, size=3, fill="red")+
+  labs(title="Accuracy and the Number of Solutions",
+       x="Number of   Solutions",y="Accuracy")+
+  coord_cartesian(ylim = c(0.5,1))+
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),strip.text.x = element_blank())+
+  facet_grid(phaseT~sol, scales = "free_x", space = "free_x")+
+  geom_smooth(data=dataInput3, aes(y=accuracy, x=nSolutions),method=glm,se=FALSE,fullrange=TRUE,linetype = "dashed")
+
+outputName = "decB02g"
+plotExport(plo,outputName)
+
+#Number of solutions of solvable solutions: Meand difference between In/Out of Phase T
+library(pander)
+dataInput2 = unique(dataInput %>% select(phaseT,id,nSolutions,sol) %>% filter(sol==1))
+diffMeans = t.test(nSolutions ~ phaseT ,data=dataInput2)
+pander(diffMeans)
+
+
+```
+
+```{r, results='asis' }
+#Includes a dummy if nSolutions==0, that's variable: sol.
+logitRandomIntercept = glmer(correct ~ sol + phaseT + nSolutions + phaseT:nSolutions + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName='decB02r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+#This version recodes phaseT to OutphaseT, to calculate the p-value of the numberOfSolutions beta(slope) In Phase Transition
+dataInput$OutPhaseT = 1 - dataInput$phaseT
+logitRandomIntercept2 = glmer(correct ~ sol + OutPhaseT + nSolutions + OutPhaseT:nSolutions + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName='decB02r_b'
+modelTableStyle(logitRandomIntercept2,title,outputType,tableName)
+
+```
+
+## Instance Sampling Figure
+
+``` {r, fig.align='center'}
+#This shows the instances sampled for the decision task, together with the regions from which they were sampled
+dataInput = dataDecProp
+dataInput$nCapacity=dataInput$c/dataInput$totalWeights
+dataInput$nProfit=dataInput$p /dataInput$totalValues
+
+dataInput$lnVC=log(dataInput$nProfit/dataInput$nCapacity)
+dataInput3 = dataInput %>% mutate(region=recode(type, `1`= 'Phase Transition', 
+                                                `2`= 'Phase Transition', `3`= 'Phase Transition', 
+                                                `4`='Phase Transition', '5'='Overconstrained', 
+                                                '6'='Underconstrained'))
+
+dataInput2 =dataInput3 %>% group_by(region) %>% summarise(minP=min(propagations),
+                                                       medianP = median(propagations),
+                                                       maxP =max(propagations),
+                                                       mlnVC=mean(lnVC)) %>% arrange(desc(region))
+phaseTransitionLevelLow=log(0.6/0.45)
+phaseTransitionLevelHigh=log(0.65/0.4)
+OUTphaseTransitionLevelLow=log(0.85/0.45)
+OUTphaseTransitionLevelHigh=log(0.9/0.4)
+OUT2phaseTransitionLevelLow=log(0.35/0.45)
+OUT2phaseTransitionLevelHigh=log(0.4/0.4)
+
+plo1 = ggplot(dataInput3,aes(x=lnVC,y=propagations,group=as.factor(region)))+
+  geom_crossbar(data=dataInput2,aes(ymin = minP, ymax = maxP, x = mlnVC, y = minP),
+                fill = "red",alpha=1)+
+  geom_crossbar(data=dataInput2,aes(ymin = minP, ymax = c(maxP[1],medianP[2],maxP[3]), x = mlnVC, y = minP, fill=as.factor(region)),alpha=1)+
+  scale_fill_manual(name  ="Region",
+                     breaks=c("Overconstrained", "Phase Transition", "Underconstrained"),
+                     labels=c("Overconstrained", "Phase Transition", "Underconstrained"),
+                     values=c("#FBB040","green","#FBB040"))+
+  geom_point(aes(shape=as.factor(sol)))+
+  scale_shape_manual(name  ="Solution",
+                        breaks=c("0", "1"),
+                        labels=c("NO", "YES"),
+                        values=c(6,4))+
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))
+
+plotExport(plo1,"decSampling")
+```
+
+
+## Accuracy (Comp. Perf.) and continuous approximation to Instance Complexity (Symmetric)
+```{r, fig.align='center'}
+#Plots ln (Normalosed Profit / Normalised capacity) against accuracy for the decision task
+dataInput = dataDecProp
+dataInput$nCapacity=dataInput$c/dataInput$totalWeights
+dataInput$nProfit=dataInput$p /dataInput$totalValues
+
+dataInput$lnVC=log(dataInput$nProfit/dataInput$nCapacity)
+p_IC = 0.4
+
+dataInput$d_lnVC=abs(dataInput$lnVC-p_IC)
+
+dataInput$IC_cont = -pweibull(dataInput$d_lnVC, shape=2, scale=0.2) 
+
+plo= ggplot(dataInput,aes(x=d_lnVC,y=IC_cont))+
+  geom_point()
+
+outputName='dec06g'
+plotExport(plo,outputName)
+
+```
+
+```{r, results='asis' }
+#logistic with random effects (intercept)
+logitRandomIntercept = glmer(correct ~ IC_cont + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName='dec06r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+
+## Accuracy and continuous approximation to Instance Complexity (Non-Symmetric)
+```{r, fig.align='center'}
+#Plots ln (Normalosed Profit / Normalised capacity) against accuracy for the decision task
+dataInput = dataDecProp
+dataInput$nCapacity=dataInput$c/dataInput$totalWeights
+dataInput$nProfit=dataInput$p /dataInput$totalValues
+
+dataInput$lnVC=log(dataInput$nProfit/dataInput$nCapacity)
+p_IC = 0.4
+
+dataInput$d_lnVC=dataInput$lnVC-p_IC
+
+shape_r=2
+shape_l=2
+scale_r=0.2
+scale_l=0.2
+
+dataInput$IC_cont[dataInput$d_lnVC>=0] = -pweibull(dataInput$d_lnVC[dataInput$d_lnVC>=0], shape=shape_r, scale=scale_r)+1 
+
+min_l=0.25
+dataInput$IC_cont[dataInput$d_lnVC<0] = (-pweibull(-dataInput$d_lnVC[dataInput$d_lnVC<0], shape=shape_l, scale=scale_l)+1)*(1-min_l)+min_l
+#-pweibull(-dataInput$d_lnVC[dataInput$d_lnVC<0], shape=shape_l, scale=scale_l)+1
+
+phaseTransitionLevelLow=log(0.6/0.45)
+phaseTransitionLevelHigh=log(0.65/0.4)
+OUTphaseTransitionLevelLow=log(0.85/0.45)
+OUTphaseTransitionLevelHigh=log(0.9/0.4)
+OUT2phaseTransitionLevelLow=log(0.35/0.45)
+OUT2phaseTransitionLevelHigh=log(0.4/0.4)
+
+plo = ggplot(dataInput,aes(x=lnVC,y=IC_cont))+
+  annotate("rect", xmin=phaseTransitionLevelLow,xmax=phaseTransitionLevelHigh,ymin=0,ymax=Inf, alpha=0.2, fill="red")+
+  annotate("rect", xmin=OUTphaseTransitionLevelLow,xmax=OUTphaseTransitionLevelHigh,ymin=0,ymax=Inf, alpha=0.2, fill="green")+
+  annotate("rect", xmin=OUT2phaseTransitionLevelLow,xmax=OUT2phaseTransitionLevelHigh,ymin=0,ymax=Inf, alpha=0.2, fill="green")+
+  geom_point()+
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+outputName='dec06gB'
+plotExport(plo,outputName)
+
+```
+
+```{r, results='asis' }
+#logistic with random effects (intercept)
+logitRandomIntercept = glmer(correct ~ IC_cont + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName='dec06rB'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+
+# Knapsack Optimisation Variant
+```{r}
+
+dataAllOpt = importTrialInfo(folderDataOpt,"opt")
+
+#Adds an experiment version column to the data based on "Participants Log.csv"
+dataAllOpt=merge(dataAllOpt,partLog, by="pID" )
+
+#Filters to get only the relevant versions
+dataAllOpt=dplyr::filter(dataAllOpt,ExpVersion %in% versions)
+
+#Imports Data Clicks Data
+dataAllClicks = importClicksInfo(folderDataOpt)
+dataAllClicks=merge(dataAllClicks,partLog, by="pID")
+dataAllClicks=dplyr::filter(dataAllClicks,ExpVersion %in% versions)
+
+#Adds Phase Transition Dummy Variable to data (1-> in Phase Transition / 0 -> Out of Phase Transition)
+dataAllOpt$phaseT=as.numeric(dataAllOpt$type<=4)
+
+#Imports Algorithm-specific complexity measures (MZN porpagations, SAT decisions and Sahni-k)
+optInstanceInfo= read.csv(fileOptInstances, sep=",", stringsAsFactors = FALSE)
+names(optInstanceInfo)[names(optInstanceInfo)=="propagations_MZN"]="propagations"
+names(optInstanceInfo)[names(optInstanceInfo)=="decisions_SAT"]="decisions"
+names(optInstanceInfo)[names(optInstanceInfo)=="problem"]="id"
+optInstanceInfo=optInstanceInfo[,c('id','propagations','decisions','sahniK')]
+
+#Generates DataOptProp:= Optimisation Task data including expost complexity measures
+dataOptProp=merge(dataAllOpt,optInstanceInfo, by="id")
+
+#Adds A column with the number of click away from optimum for each trial
+dataOptProp=addItemDistanceFromOpt(dataOptProp)
+#Adds sum of weights and sum of values 
+dataOptProp=addSumOfValues(dataOptProp)
+dataOptProp=addSumOfWeights(dataOptProp)
+
+# Cleaning Optimisation Task Data:
+# Filters out the cases in which participants spent less than 1 second in the task
+dataOptProp1 = dataOptProp %>% filter(dataOptProp$timeSpent>=1)
+numberOfDeletedTrials=dim(dataOptProp)[1]-dim(dataOptProp1)[1]
+
+NOmitPartOpt= length(dataOptProp %>% filter(dataOptProp$timeSpent<1) %>% select(pID))
+
+print(paste("Number of Trials Deleted because participants spent less than 1 second in the task:",
+            numberOfDeletedTrials,"(from",NOmitPartOpt,"Participants)."))
+dataOptProp = dataOptProp1
+rm(dataOptProp1)
+
+summaryListOpt= summaryData(dataOptProp)
+
+# Omit those participants that never submitted their answer from the timeSpent analysis
+#omitPID = c("be19","be31")
+minTimeSpent = dataOptProp %>% group_by(pID) %>% summarise(minTime = min(timeSpent)) 
+omitPID = minTimeSpent$pID[abs(optTaskMaxTime-minTimeSpent$minTime)<0.1] #Select those participants whose min time spent was optTaskMaxTime
+dataOptTime=dataOptProp[!(dataOptProp$pID %in% omitPID),]
+print(paste0("For time analysis (*effort*) ", length(omitPID)," participants that never submitted their answers were omited."))
+
+```
+
+## Descriptive Sumamry
+```{r}
+print(paste('Participants To be analysed are:',paste(unique(dataOptProp$pID),collapse=" ")))
+print(paste('Number of participants to analyse :',length(unique(dataOptProp$pID)) ) )
+print(paste("The overall Accuracy was: ",mean(dataOptProp$correct)))
+```
+
+```{r, results='asis'}
+#Summary Stats for Optimisation Problem
+dataInput=dataOptProp
+dataInput2= dataOptTime
+
+accuracySummary = dataInput %>% group_by(pID) %>% summarise(acc=mean(correct)) %>% summarise(mean=mean(acc),min=min(acc),max=max(acc),SD=sd(acc))
+kable(accuracySummary, digits=2, caption ="Accuracy Summary")
+
+timeSummary = dataInput2 %>% group_by(pID) %>% summarise(acc=mean(timeSpent)) %>% summarise(mean=mean(acc),min=min(acc),max=max(acc),SD=sd(acc))
+kable(timeSummary, digits=2, caption ="Time spent Summary")
+```
+
+### Effect of Trial number
+
+#### Trial Number and Accuracy
+```{r, results='asis'}
+#Trial (experience effect) effect on accuracy
+dataInput=dataOptProp
+dataInput$totalTrial = dataInput$block * dataInput$trial
+
+summaryByBlock = dataInput %>% group_by(block,pID) %>% summarise(acc=mean(correct)) %>% summarise(mean=mean(acc),min=min(acc),max=max(acc),SD=sd(acc))
+kable(summaryByBlock, digits=2, caption="Accuracy By Block")
+
+#Regression
+logitRandomIntercept = glmer(correct ~ totalTrial+ (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName='opt01r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+#### Trial Number and Time Spent
+```{r, results='asis'}
+#Trial (experience effect) effect on timeSpent
+dataInput=dataOptTime
+dataInput$totalTrial = dataInput$block * dataInput$trial
+
+summaryByBlock = dataInput %>% group_by(block,pID) %>% summarise(time=mean(timeSpent)) %>% summarise(mean=mean(time),min=min(time),max=max(time),SD=sd(time))
+kable(summaryByBlock,digits=2 , caption="Time Spent per Trial segregated By Block")
+
+#Regression
+linearRandomIntercept = lmer(timeSpent ~ totalTrial+ (1|pID), data=dataInput)
+
+title="Linear regressions"
+tableName='opt02r'
+modelTableStyle(linearRandomIntercept,title,outputType,tableName)
+
+```
+
+
+## In and Out of Phase Transition Contrast
+
+### Phase Transition and Accuracy (Computational Performance)
+```{r , fig.align='center'}
+
+dataInput=dataOptProp %>% group_by(phaseT,pID)%>%summarise(accuracy1=mean(correct))%>%ungroup()%>%group_by(phaseT)%>%summarise(accuracy=mean(accuracy1),se=se(accuracy1))%>%ungroup()
+
+dataInput$phaseT = recode(dataInput$phaseT, '0' = "Low IC", '1' = "High IC")
+
+plo= ggplot(data=dataInput, aes(y=accuracy, x=as.factor(phaseT),label = round(accuracy,digits = 2))) +
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin=accuracy-se, ymax=accuracy+se), width=.1)+
+  geom_signif(comparisons = list(c("Low IC","High IC")), annotations="***", y_position = 1.01, tip_length = 0.03)+
+  labs(title="Accuracy and Instance Complexity (Optimisation)",x="Instance complexity",y="Computational performance")+
+  coord_cartesian(ylim = c(0.5,1.03))+
+  geom_text(hjust=0.5,vjust = 5, colour="white") +
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))
+
+outputName = "opt03g"
+plotExport(plo,outputName)
+
+```
+
+```{r}
+anovaModel=aov(correct~phaseT+Error(pID/phaseT),dataOptProp)
+anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+rm(dataInput)
+```
+
+```{r, results='asis'}
+#logistic with random effects (intercept)
+logitRandomIntercept = glmer(correct ~ phaseT + (1|pID), family=binomial(link="logit"), data=dataOptProp)
+
+title="Logistic regressions"
+tableName='opt03r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+### Time Spent (*Effort*) In/Out Phase Transition
+```{r, fig.align='center'}
+
+dataInput=dataOptTime %>% group_by(phaseT,pID)%>%summarise(timeSpentMeans=mean(timeSpent))%>%ungroup()%>%group_by(phaseT)%>%summarise(time=mean(timeSpentMeans),se=se(timeSpentMeans))%>%ungroup()
+
+dataInput$phaseT = recode(dataInput$phaseT, '0' = "Low IC", '1' = "High IC")
+
+plo= ggplot(data=dataInput, aes(y=time, x=as.factor(phaseT),label = round(time,digits = 1))) +
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin=time-se, ymax=time+se), width=.1)+
+  geom_signif(comparisons = list(c("Low IC","High IC")), annotations="***", y_position = 50, tip_length = 0.03)+
+  labs(title="Time spent on an instance and Instance Complexity",x="Instance complexity",y="Average time spent on an instance")+
+  geom_text(hjust=0.5,vjust = 5, colour="white") +
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))+
+  coord_cartesian(ylim = c(0,52))
+
+outputName = "opt04g"
+plotExport(plo,outputName)
+
+#Stats test for time in and out of phase transition: ANOVA
+anovaModel=aov(timeSpent~phaseT+Error(pID/phaseT),dataOptTime)
+anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+
+rm(dataInput)
+```
+
+```{r, results='asis'}
+#logistic with random effects (intercept)
+linearMRandomIntercept = lmer(timeSpent ~ phaseT + (1|pID), data=dataOptTime)
+
+title="Linear regressions"
+tableName='opt04r'
+modelTableStyle(linearMRandomIntercept,title,outputType,tableName)
+
+```
+
+### Effort and Phase Transition interaction effect on Accuracy
+##### Is the effect of effort (time spent) on accuracy (Computational Performance) modulated by Instance Complexity (In/Out of Phase Transition)?
+
+```{r, results='asis'}
+
+logitRandomIntercept = glmer(correct ~ scale(timeSpent) + phaseT +  phaseT:scale(timeSpent) + (1|pID), family=binomial(link="logit"), data=dataOptTime)
+
+title="Logistic regressions"
+tableName='opt05r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+```
+
+## MZN Propagations
+
+###  MZN Propagations and Accuracy (Computational Performance)
+```{r, fig.align='center'}
+
+#MZN Propagations
+groups4=dataOptProp %>% group_by(propagations)
+dat4=summarise(groups4, accuracy=mean(correct), se=se(correct))
+
+plo = ggplot(data=dat4, aes(y=accuracy, x=propagations)) +
+  geom_point()+
+  labs(title="Accuracy and MZN",y="Accuracy",x="MZN Complexity Measure (Propagations)")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  stat_smooth(method = glm)+
+  geom_hline(aes(yintercept=0.5), colour="#990000", linetype="dashed")
+
+outputName = "opt06g"
+plotExport(plo,outputName)
+```
+
+```{r, results='asis'}
+
+logitRandomIntercept = glmer(correct ~ propagations + (1|pID), family=binomial(link="logit"), data=dataOptProp)
+#summary(logitRandomInterceptSlope)
+
+title="Logistic regressions"
+tableName='opt06r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+### MZN Propagations and Time Spent
+```{r, fig.align='center'}
+#Average per propagations plotted
+groups5=dataOptTime %>% group_by(propagations)
+dat5=summarise(groups5, time=mean(timeSpent), se=se(propagations))
+
+plo = ggplot(data=dat5, aes(y=time, x=propagations)) +
+  geom_point()+
+  labs(title="Time Spent and MZN Propagations",y="Time spent on an instance",x="MZN Complexity Measure (Propagations)")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  stat_smooth(method = glm)+
+  geom_hline(aes(yintercept=0.5), colour="#990000", linetype="dashed")
+
+outputName = "opt06g2"
+plotExport(plo,outputName)
+
+```
+
+```{r, results='asis'}
+
+linearMRandomIntercept = lmer(timeSpent ~ propagations + (1|pID), data=dataOptTime)
+
+title="Linear regressions"
+tableName='opt06r2'
+modelTableStyle(linearMRandomIntercept,title,outputType,tableName)
+
+```
+
+
+## SAT Decisions
+### SAT and Accuracy (Computational Performance)
+```{r, fig.align='center'}
+#SAT Decisions
+groups5=dataOptProp %>% group_by(decisions)
+dat5=summarise(groups5, accuracy=mean(correct), se=se(correct))
+
+plo = ggplot(data=dat5, aes(y=accuracy, x=decisions)) +
+  geom_point()+
+  labs(title="Accuracy and SAT",y="Accuracy",x="SAT Complexity Measure (Decisions)")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  stat_smooth(method = glm)+
+  geom_hline(aes(yintercept=0.5), colour="#990000", linetype="dashed")
+
+outputName = "opt07g"
+plotExport(plo,outputName)
+```
+
+
+```{r, results='asis'}
+
+logitRandomIntercept = glmer(correct ~ decisions + (1|pID), family=binomial(link="logit"), data=dataOptProp)
+
+title="Logistic regressions"
+tableName='opt07r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+### SAT Decisions and Time Spent
+```{r, fig.align='center'}
+
+groups5=dataOptTime %>% group_by(decisions)
+dat5=summarise(groups5, time=mean(timeSpent), se=se(decisions))
+
+plo = ggplot(data=dat5, aes(y=time, x=decisions)) +
+  geom_point()+
+  labs(title="Time Spent and SAT decisions",y="Time spent on an instance",x="SAT Complexity Measure (Decisions)")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  stat_smooth(method = glm)+
+  geom_hline(aes(yintercept=0.5), colour="#990000", linetype="dashed")
+
+outputName = "opt08g"
+plotExport(plo,outputName)
+```
+
+```{r, results='asis'}
+linearMRandomIntercept = lmer(timeSpent ~ decisions + (1|pID), data=dataOptTime)
+
+title="Linear regressions"
+tableName='opt08r'
+modelTableStyle(linearMRandomIntercept,title,outputType,tableName)
+```
+
+## Sahni-K Analysis
+
+### Sahni-K and Accuracy (Computational Performance)
+```{r, fig.align='center'}
+
+dataInput=dataOptProp %>% group_by(sahniK,pID)%>%summarise(accuracy1=mean(correct))%>%ungroup()%>%group_by(sahniK)%>%summarise(accuracy=mean(accuracy1),se=se(accuracy1))%>%ungroup()
+
+plo= ggplot(data=dataInput, aes(y=accuracy, x=as.factor(sahniK),
+                                label = round(accuracy,digits = 2))) +
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin=accuracy-se, ymax=accuracy+se), width=.1)+
+  geom_signif(comparisons = list(c("0","1")), annotations="***", 
+             y_position = 1, tip_length = 0.03)+
+  geom_signif(comparisons = list(c("1","2")), annotations="*", 
+               y_position = 0.8, tip_length = 0.03)+
+  labs(title="Computational Performance and sahni-K complexity",
+       x="Sahni-K Complexity",y="Computational Performance")+
+  coord_cartesian(ylim = c(0.3,1.03))+
+  geom_text(hjust=0.5,vjust = 4.5, colour="white") +
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))+
+  geom_hline(aes(yintercept = 0.5),linetype="dotted")
+
+outputName = "opt09g"
+plotExport(plo,outputName)
+
+#Sahni-K boxplot: I think it says quite a bit
+# dataInput=dataOptProp %>% group_by(sahniK,pID)%>%summarise(accuracy=mean(correct))%>%ungroup()
+# 
+# ggplot(dataInput, aes(x=as.factor(sahniK), y=accuracy))+
+#   geom_boxplot(outlier.shape=1)+
+#   #geom_boxplot( aes(x=as.logical(phaseT), y=accuracy),outlier.shape=1) +
+#   stat_summary(fun.y=mean, colour="darkred", geom="point", size=2, shape=17) +
+#   stat_summary(fun.y=mean, colour="darkred", geom="text", size=3, aes( label=round(..y.., digits=2)),hjust=1.5,vjust=0.5) +
+#   #coord_cartesian(ylim = c(0,1)) +
+#   labs(title="Accuracy and Sahni-K",x="Sahni-K",y="Percentage")+
+#   theme(plot.title = element_text(hjust = 0.5))+#, axis.text.x = element_text(angle=45,hjust=1))+
+#   geom_hline(aes(yintercept=0.5), colour="#990000", linetype="dashed")
+
+```
+
+```{r, results='asis'}
+logitRandomIntercept = glmer(correct ~ sahniK + (1|pID), family=binomial(link="logit"), data=dataOptProp)
+
+title="Logistic regressions"
+tableName='opt09r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+```
+```{r, results='asis'}
+#logistic corroborations of significance shown in Accuracy/SahniK plot
+dataInput =dataOptProp
+dataInput$sahniK0= (dataInput$sahniK==0)
+dataInput$sahniK1= (dataInput$sahniK==1)
+dataInput$sahniK2= (dataInput$sahniK==2)
+
+#logitRandomIntercept0 = glmer(correct ~ sahniK1 + sahniK2 + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+logitRandomIntercept1 = glmer(correct ~ sahniK0 + sahniK2 + (1|pID), family=binomial(link="logit"), data=dataInput)
+
+title="Logistic regressions"
+tableName='opt09r1'
+modelTableStyle(logitRandomIntercept1,title,outputType,tableName)
+
+
+```
+
+### Sahni-K and Time Spent
+```{r, fig.align='center'}
+
+dataInput=dataOptTime %>% group_by(sahniK,pID)%>%summarise(timeSpentMeans=mean(timeSpent))%>%ungroup()%>%group_by(sahniK)%>%summarise(time=mean(timeSpentMeans),se=se(timeSpentMeans))%>%ungroup()
+
+plo= ggplot(data=dataInput, aes(y=time, x=as.factor(sahniK),
+                                label = round(time,digits = 1))) +
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin=time-se, ymax=time+se), width=.1)+
+  geom_signif(comparisons = list(c("1","2")), annotations="**", 
+               y_position = 52, tip_length = 0.03)+
+ geom_signif(comparisons = list(c("0","2")), annotations="***", 
+             y_position = 56, tip_length = 0.03)+
+ geom_signif(comparisons = list(c("0","1")), annotations="NS", 
+             y_position = 48, tip_length = 0.03)+
+  labs(title="Time spent on an instance and sahni-K complexity",
+       x="Sahni-K Complexity",y="Average time spent on an instance")+
+  coord_cartesian(ylim = c(0,57))+
+  geom_text(hjust=0.5,vjust = 5, colour="white") +
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))
+
+outputName = "opt10g"
+plotExport(plo,outputName)
+```
+
+```{r, results='asis'}
+linearMRandomIntercept = lmer(timeSpent ~ sahniK + (1|pID), data=dataOptTime)
+
+title="Linear regressions"
+tableName='opt10r'
+modelTableStyle(linearMRandomIntercept,title,outputType,tableName)
+
+```
+```{r, results='asis'}
+#logistic corroborations of significance shown in Accuracy/SahniK plot for time
+dataInput =dataOptProp
+dataInput$sahniK0= (dataInput$sahniK==0)
+dataInput$sahniK1= (dataInput$sahniK==1)
+dataInput$sahniK2= (dataInput$sahniK==2)
+
+linearRandomIntercept0 = lmer(timeSpent ~ sahniK1 + sahniK2 + (1|pID), data=dataInput)
+
+linearRandomIntercept1 = lmer(timeSpent ~ sahniK0 + sahniK2 + (1|pID), data=dataInput)
+
+title="Linear regressions"
+tableName='opt09r2a'
+modelTableStyle(list(linearRandomIntercept0,linearRandomIntercept0),title,outputType,tableName)
+
+tableName='opt09r2b'
+modelTableStyle(list(linearRandomIntercept1,linearRandomIntercept1),title,outputType,tableName)
+
+
+```
+
+### Sahni-K, IC and Effort
+##### Is effort (time spent) modulated by Sahni-K or IC?
+
+```{r, results='asis'}
+
+linearRandomIntercept = lmer(timeSpent ~ sahniK + phaseT + sahniK:phaseT + (1|pID), data=dataOptTime)
+
+title="Linear regressions"
+tableName='opt11r'
+modelTableStyle(linearRandomIntercept,title,outputType,tableName)
+```
+
+
+
+## Other Performance Measures
+
+### Profit Reached (Value Performance)
+
+#### Phase Transition and Value Performance
+```{r, fig.align='center'}
+
+dataInput=dataOptProp
+dataInput=dataInput[dataInput$capacitySel<=dataInput$capacity,]
+dataInput$profitNormalised=dataInput$profitSel/dataInput$profitOpt
+
+dataInput2=dataInput %>% group_by(phaseT,pID)%>%summarise(profitNormalised1=mean(profitNormalised))%>%ungroup()%>%group_by(phaseT)%>%summarise(profitNormalised=mean(profitNormalised1),se=se(profitNormalised1))%>%ungroup()
+
+plo = ggplot(data=dataInput2, aes(y=profitNormalised, x=as.factor(as.logical(phaseT)), label = round(profitNormalised,digits = 2),group=1)) +
+  geom_line()+
+  geom_errorbar(aes(ymin=profitNormalised-se, ymax=profitNormalised+se), width=.1) +
+  geom_point(shape=21, size=3, fill="white")+
+  labs(title="Profit Normalised In and Out of phase Transition",x="In Phase Transition?",y="Value Performance")+
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle=0,hjust=0.5))+
+  geom_text(hjust=-0.5, colour="black")
+  #coord_cartesian(ylim = c(0,1)) 
+
+outputName = "opt11Ag"
+plotExport(plo,outputName)
+
+
+```
+
+
+```{r, results='asis'}
+#Effect of phase Transition in Value (economic) performance
+dataInput=dataInput
+
+linearRandomIntercept = lmer(profitNormalised ~ phaseT + (1|pID), data=dataInput)
+
+title="Linear regressions"
+tableName='opt11Ar'
+modelTableStyle(linearRandomIntercept,title,outputType,tableName)
+
+```
+
+#### Time Spent and value performance
+```{r, fig.align='center'}
+
+dataTemp=dataOptTime
+dataTemp=dataTemp[dataTemp$capacitySel<dataTemp$capacity,]
+dataTemp$profitNormalised=dataTemp$profitSel/dataTemp$profitOpt
+
+plo = ggplot(data=dataTemp, aes(x=timeSpent, y=profitNormalised)) +
+  geom_point()+
+  labs(title="Effort and Economic Preformance",x="Time spent on an instance",y="Profit Reached")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  stat_smooth(method = glm)
+
+outputName = "opt12g"
+plotExport(plo,outputName)
+
+cor.test(dataTemp$timeSpent,dataTemp$profitNormalised)
+
+```
+
+```{r, results='asis'}
+linearMRandomIntercept = lmer(profitNormalised ~ timeSpent + (1|pID), data=dataTemp)
+
+title="Linear regressions"
+tableName='opt12r'
+modelTableStyle(linearMRandomIntercept,title,outputType,tableName)
+
+```
+
+### Item Performance (Number of clicks away from the optimum)
+
+#### Phase Transition and item Performance
+
+```{r, fig.align='center'}
+
+dataInput=dataOptProp
+
+dataInput2=dataInput %>% group_by(phaseT,pID)%>%summarise(meanDistance1=mean(itemDistanceFromOpt))%>%ungroup()%>%group_by(phaseT)%>%summarise(meanDistance=mean(meanDistance1),se=se(meanDistance1))%>%ungroup()
+
+plo = ggplot(data=dataInput2, aes(y=meanDistance, x=as.factor(as.logical(phaseT)), label = round(meanDistance,digits = 2),group=1)) +
+  geom_line()+
+  geom_errorbar(aes(ymin=meanDistance-se, ymax=meanDistance+se), width=.1) +
+  geom_point(shape=21, size=3, fill="white")+
+  labs(title="Item Performance In and Out of phase Transition",x="In Phase Transition?",y="Item Performance")+
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle=0,hjust=0.5))+
+  geom_text(hjust=-0.5, colour="black")
+
+outputName = "opt13g"
+plotExport(plo,outputName)
+
+```
+
+```{r, results='asis'}
+#Trial (experience effect) effect on timeSpent
+dataInput=dataOptProp
+
+linearRandomIntercept = lmer(itemDistanceFromOpt ~ phaseT + (1|pID), data=dataInput)
+
+title="Linear regressions"
+tableName='opt13r'
+modelTableStyle(linearRandomIntercept,title,outputType,tableName)
+
+```
+
+#### Time Spent and Item Performance
+```{r, fig.align='center'}
+plo = ggplot(data=dataOptTime, aes(x=timeSpent, y=itemDistanceFromOpt)) +
+  geom_point()+
+  labs(title="Effort and Item Preformance",x="Time spent on an instance",y="Number of clicks away from the optimum")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  stat_smooth(method = glm)
+
+outputName = "opt14g"
+plotExport(plo,outputName)
+
+cor.test(dataOptTime$timeSpent,dataOptTime$itemDistanceFromOpt)
+```
+
+```{r, results='asis'}
+linearMRandomIntercept = lmer(itemDistanceFromOpt ~ timeSpent + (1|pID), data=dataOptTime)
+
+title="Linear regressions"
+tableName='opt14r'
+modelTableStyle(linearMRandomIntercept,title,outputType,tableName)
+```
+
+## Time Spent and Accuracy (Computational Performance)
+```{r, fig.align='center'}
+
+dataInput= dataOptTime %>% group_by(correct,pID) %>% summarise(timeSpentMeans=mean(timeSpent)) %>% ungroup() %>% group_by(correct) %>%
+  summarise(time=mean(timeSpentMeans),se=se(timeSpentMeans))%>%ungroup()
+
+plo = ggplot(data=dataInput, aes(y=time, x=as.factor(as.logical(correct)), label = round(time,digits = 2),group=1)) +
+  geom_line()+
+  geom_errorbar(aes(ymin=time-se, ymax=time+se), width=.1) +
+  geom_point(shape=21, size=3, fill="white")+
+  labs(title="Time Spent on Correct/Incorrect instances",x="Reached Optimum",y="Time Spent") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle=0,hjust=0.5))+
+  geom_text(hjust=-0.5, colour="black")
+
+outputName = "opt15g"
+plotExport(plo,outputName)
+
+#Stats test for time in and out of phase transition: ANOVA
+anovaModel=aov(timeSpent~correct+Error(pID/correct),dataOptTime)
+anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+
+rm(dataInput)
+
+```
+
+```{r, fig.align='center', results='asis'}
+#Stats test for time for correct/incorrect answers
+logitRandomIntercept = glmer(correct ~ timeSpent + (1|pID), family=binomial(link="logit"), data=dataOptTime)
+
+title="Logistic regressions"
+tableName='opt15r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+```
+
+# Decision Vs. Optimisation
+```{r opt_dec_comparison}
+
+names(summaryListDec[[2]])['mean(correct)'==names(summaryListDec[[2]])]='AccuracyDecision'
+names(summaryListOpt[[2]])['mean(correct)'==names(summaryListOpt[[2]])]='AccuracyOptimisation'
+
+varMerge = merge(summaryListDec[[2]], summaryListOpt[[2]], by="pID")
+#varMerge = varMerge %>% filter(pID != "be16")#Outlier
+
+cortest = cor.test(varMerge$AccuracyDecision,varMerge$AccuracyOptimisation,method="pearson")#spearman is non-parametric
+print(cortest)
+  
+plo = ggplot(varMerge,aes_string(x="AccuracyDecision",y="AccuracyOptimisation"))+
+  geom_point(shape=23, size=3, fill="red") +
+  geom_smooth(method="lm",se=FALSE,linetype="dashed")+#GLM or LM(SAT...)
+  labs(x="Knapsack Accuracy: Decision",y="Knapsack Accuracy: Optimisation")+
+  theme_light()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5))
+
+outputName = "decOpt01g"
+plotExport(plo,outputName)
+
+```
+
+
+# Appendix Test Corroborations
+
+## Controlling for effort, is Phase Transition still significant in the optimisation task?
+```{r, fig.align='center', results='asis'}
+#Keeping timeSpent constant. is Phase transition effect on accuracy significant?
+logitRandomIntercept = glmer(correct ~ phaseT + timeSpent + (1|pID), family=binomial(link="logit"), data=dataOptTime)
+
+title="Logistic regressions"
+tableName='app01r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+
+```
+
+## Solvability and accuracy (Computational Performance) for KS Decision Task
+```{r , fig.align='center'}
+
+dataInput=dataDecProp %>% group_by(sol,pID)%>%summarise(accuracy1=mean(correct))%>%ungroup()%>%group_by(sol)%>%summarise(accuracy=mean(accuracy1),se=se(accuracy1))%>%ungroup()
+
+plo = ggplot(data=dataInput, aes(y=accuracy, x=as.factor(as.logical(sol)), label = round(accuracy,digits = 2),group=1)) +
+  geom_line()+
+  geom_errorbar(aes(ymin=accuracy-se, ymax=accuracy+se), width=.1) +
+  geom_point(shape=21, size=3, fill="white")+
+  labs(title="Accuracy depending on solvability",x="Does the instance have a solution?",y="Accuracy")+
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle=0,hjust=0.5))+
+  geom_text(hjust=-0.5, colour="black")
+
+outputName = "app02g"
+plotExport(plo,outputName)
+
+```
+
+```{r, results='asis'}
+anovaModel=aov(correct~sol+Error(pID/sol),dataDecProp)
+anovaPValue=summary(anovaModel)[[2]][[1]][['Pr(>F)']][[1]]
+print(paste("P-value for one way ANOVA:",signif(anovaPValue,digits=3)))
+rm(dataInput)
+```
+
+```{r, results='asis'}
+
+#logistic with random effects (intercept)
+logitRandomIntercept = glmer(correct ~ answer + (1|pID), family=binomial(link="logit"), data=dataDecProp)
+
+title="Logistic regressions"
+tableName='app02r'
+modelTableStyle(logitRandomIntercept,title,outputType,tableName)
+
+```
+
+## Do people still modulate their effort when they don't find the solution in the optimisation task?
+```{r, fig.align='center', results='asis'}
+
+linearRandomIntercept = lmer(timeSpent ~ phaseT + correct + phaseT:correct + (1|pID), data=dataOptTime)
+
+title="Linear regressions"
+tableName='app03r'
+modelTableStyle(linearRandomIntercept,title,outputType,tableName)
+
+```
+
+
+# Arithmetic Test
+First 3 trials where regarded as practice trials.
+```{r, message=TRUE, warning=TRUE}
+# Import Math Data (Mental Arithmetic)
+dataMath=importMathInfo(folderDataMath)
+dataMath=merge(dataMath,partLog, by="pID" )
+
+# Filter defined versions
+dataMath=dplyr::filter(dataMath,ExpVersion %in% versions)
+
+#Generate Correct/Incorrect Variable
+dataMath$correct= (dataMath$answer == dataMath$solution)
+dataMath$correct[is.na(dataMath$correct)]=FALSE
+
+#Filter First 3 trials of task; they were considered practice trials
+dataMath=dataMath %>% filter( trial>= 4 | block != 1 )
+
+summaryMath=dataMath %>% group_by(pID) %>% summarise(mean(correct), mean(timeSpent), mean(submitted))
+names(summaryMath)['mean(correct)'==names(summaryMath)]='AccuracyMath'
+```
+
+```{r}
+print(paste('Number of participants to analyse:',length(unique(dataMath$pID)) ) )
+print(paste('Participants To be analysed are:',paste(unique(dataMath$pID),collapse=" ")))
+print(paste("The overall MATH accuracy is",mean(dataMath$correct)))
+```
+
+## Accuracy in Decision Knapsack problem and Mental Arithmetic
+```{r, fig.align='center'}
+names(summaryListDec[[2]])['AccuracyDecision'==names(summaryListDec[[2]])]='AccuracyKnapsack'
+mathMerge = merge(summaryListDec[[2]], summaryMath, by="pID")
+
+#mathMerge = mathMerge %>% filter(pID != "be16")
+
+plo =  ggplot(mathMerge,aes(x=AccuracyKnapsack,y=AccuracyMath))+ 
+  geom_point() +
+  geom_smooth(method="lm")#GLM or LM(SAT...)
+
+
+outputName = "math01g"
+plotExport(plo,outputName)
+
+mathDec = cor.test(mathMerge$AccuracyKnapsack,mathMerge$AccuracyMath,method="pearson")#spearman is non-parametric vs. pearson which is parametric (linear)
+```
+
+## Accuracy in Optimisation Knapsack problem and Mental Arithmetic
+```{r, fig.align='center'}
+#Accuracy of Knapsack vs. Math Task Accuracy
+names(summaryListOpt[[2]])['AccuracyOptimisation'==names(summaryListOpt[[2]])]='AccuracyKnapsack'
+mathMerge = merge(summaryListOpt[[2]], summaryMath, by="pID")
+
+plo = ggplot(mathMerge,aes(x=AccuracyKnapsack,y=AccuracyMath))+
+  geom_point() +
+  geom_smooth(method="lm")
+
+outputName = "math02g"
+plotExport(plo,outputName)
+
+mathOpt =cor.test(mathMerge$AccuracyKnapsack,mathMerge$AccuracyMath,method="pearson")#spearman is non-parametric
+```
+
+
+
+
+# CANTAB Task
+
+```{r}
+#CANTAB Data import
+dataCantab=importCantabInfo(folderDataCantab)
+names(dataCantab)[names(dataCantab)=="subject.ID"]="pID"
+dataCantab=merge(dataCantab,partLog, by="pID" )
+#Subsetting the relevant versions
+dataCantab=dplyr::filter(dataCantab,ExpVersion %in% versions)
+
+# Subsetting only completed Tests
+dataCantabWork=dataCantab[dataCantab$PAL.Recommended.Standard.Extended.Status=="COMPLETED",]
+#Variables of interest
+vInterest=c("pID","PALFAMS28","PALTEA28","SSPFSL","SWMS","SWMBE4","SWMBE6","SWMBE8","SWMBE12","SWMBE468","SWMTE4","SWMTE6","SWMTE8","SWMTE12","SWMTE468")
+dataCantabWork=dataCantabWork[,vInterest]
+
+#Generates new measure for SWM
+SWMweights=c(4,3,2,1)
+dataCantabWork$SWMTEweightedJP=dataCantabWork$SWMTE4 * SWMweights[1] + dataCantabWork$SWMTE6 * SWMweights[2] +dataCantabWork$SWMTE8 * SWMweights[3] #+ dataCantabWork$SWMTE12 * SWMweights[4]
+dataCantabWork$SWMBEweightedJP=dataCantabWork$SWMBE4 * SWMweights[1] + dataCantabWork$SWMBE6 * SWMweights[2] +dataCantabWork$SWMBE8 * SWMweights[3] #+ dataCantabWork$SWMBE12 * SWMweights[4]
+
+#Drops unwanted CANTAB Tasks
+dropC=c("SWMBE4","SWMBE6","SWMBE8","SWMBE12","SWMBE468","SWMTE4","SWMTE6","SWMTE8","SWMTE12","SWMTE468")
+dataCantabWork=dataCantabWork[,!(names(dataCantabWork) %in% dropC)]
+
+#Actual variable list to be used for correlation analysis with knapsack performance measures.
+variables=names(dataCantabWork)[-1]
+```
+
+```{r CANTAB ksDecision}
+#Analysis of a variables and mean Decision KS accuracy
+decResults=list()
+for (i in 1:length(variables)){
+  #print(i)
+  summaryVar=dataCantabWork[,c("pID",variables[i])]
+  #summaryVar=dataCantabWork[,c("subject.ID","SSPFSL")]
+  names(summaryVar)[1]="pID"
+  decResults[[i]]=indDiffAnalysis(summaryVar,dataAllDec)
+}
+
+
+```
+
+```{r CANATAB ksOptimisation}
+#Analysis of a variables and mean Optimisation KS accuracy
+
+optResults=list()
+for (i in 1:length(variables)){
+  summaryVar=dataCantabWork[,c("pID",variables[i])]
+  names(summaryVar)[1]="pID"
+  optResults[[i]]=indDiffAnalysis(summaryVar,dataAllOpt)
+}
+
+```
+
+
+```{r, fig.align='center', results='asis'}
+
+pearson_se = function(cortest){
+  Standard.Error = unname(sqrt((1 - cortest$estimate^2)/cortest$parameter))
+  return(Standard.Error)
+}
+
+cogTasksTable=data.frame(Task=c("Mental Arithmetic"),
+               KS_Dec_corr=c(mathDec$estimate),
+               KS_Dec_Pvalue=c(mathDec$p.value),
+               KS_Dec_df=c(mathDec$parameter),
+               KS_Dec_se=c(pearson_se(mathDec)),
+               KS_Opt_corr=c(mathOpt$estimate),
+               KS_Opt_Pvalue=c(mathOpt$p.value),
+               KS_Opt_df=c(mathOpt$parameter),
+               KS_Opt_se=c(pearson_se(mathOpt)),
+               stringsAsFactors=FALSE,row.names = NULL)
+
+for (i in 1:length(variables)){
+  row=list(variables[i],
+           decResults[[i]]$corrTest$estimate,
+           decResults[[i]]$corrTest$p.value,
+           decResults[[i]]$corrTest$parameter,
+           pearson_se(decResults[[i]]$corrTest),
+           optResults[[i]]$corrTest$estimate, 
+           optResults[[i]]$corrTest$p.value,
+          optResults[[i]]$corrTest$parameter,
+          pearson_se(optResults[[i]]$corrTest))
+  cogTasksTable=rbind(cogTasksTable,row)
+}
+title="Cognitive and Knapsack Abilities Correlations"
+outputName="cogr01"
+exportTable(cogTasksTable,title,outputType,outputName)
+
+
+```
+
+Refer to "tables.Rmd" for the code on how to combine the tables.

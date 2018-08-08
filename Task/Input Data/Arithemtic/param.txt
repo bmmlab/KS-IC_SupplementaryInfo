@@ -1,0 +1,4 @@
+timeRest1min:0
+timeRest1max:0
+timeRest2:25
+timeTrial:13
