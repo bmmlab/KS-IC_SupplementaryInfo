@@ -162,7 +162,7 @@ dataDecProp=merge(dataAllDec,decisionInstanceInfo, by="id")
 # Cleaning Decsion Data:
 # Filters out those trials in which an answer was not given
 nOmitTrials = length(dataDecProp$answer[dataDecProp$answer==2])
-NOmitPart= length(dataDecProp$pID[dataDecProp$answer==2])
+NOmitPart= length(unique(dataDecProp$pID[dataDecProp$answer==2]))
 dataDecProp=dataDecProp %>% filter(answer!=2)
 print(paste(nOmitTrials,"Trials were omitted due to non-answers (from", NOmitPart,"Participants)."))
 
@@ -664,7 +664,7 @@ dataOptProp=addSumOfWeights(dataOptProp)
 dataOptProp1 = dataOptProp %>% filter(dataOptProp$timeSpent>=1)
 numberOfDeletedTrials=dim(dataOptProp)[1]-dim(dataOptProp1)[1]
 
-NOmitPartOpt= length(dataOptProp %>% filter(dataOptProp$timeSpent<1) %>% select(pID))
+NOmitPartOpt= length(unique(dataOptProp %>% filter(dataOptProp$timeSpent<1) %>% pull(pID)))
 
 print(paste("Number of Trials Deleted because participants spent less than 1 second in the task:",
             numberOfDeletedTrials,"(from",NOmitPartOpt,"Participants)."))
