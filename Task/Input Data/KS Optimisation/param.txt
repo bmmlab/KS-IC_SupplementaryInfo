@@ -1,5 +1,0 @@
-timeRest1min:10
-timeRest1max:10
-timeRest2:60
-timeTrial:60
-timeOnlyItems:0

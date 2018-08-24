@@ -1,3 +1,0 @@
-numberOfTrials:11
-numberOfBlocks:3
-numberOfInstances:33
