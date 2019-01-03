@@ -1,0 +1,190 @@
+---
+title: "Expected Number of Solutions and Constrainedness of the Knapsack Decision Problem"
+author: "J. Pablo Franco, Nitin Yadav, Peter Bossaerts, Carsten Murawski"
+date: "25/12/2018"
+output: 
+  html_document: 
+    number_sections: yes
+    theme: united
+    toc: yes
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r parameters}
+n=15
+alpha=1
+beta=1
+
+```
+
+
+```{r functions}
+
+library(reshape2)
+library(plotly)
+library(dplyr)
+library(ggplot2)
+
+#Cut into bins the data, but name each bin as the mean(left,right) of each bin.
+cut_jp = function(uncut_vector,n_bins){
+  labs = cut(uncut_vector,n_bins)
+  cut_vec = data.frame(lower = as.numeric( sub("\\((.+),.*", "\\1", labs) ),
+                         upper = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", labs) ))
+  cut_vec$mean= rowMeans(cut_vec)
+  cut_vec$bin_ix = cut(uncut_vector,n_bins, labels = FALSE)
+  
+  labs = levels(cut(uncut_vector, n_bins))
+  bins_info = data.frame(lower = as.numeric( sub("\\((.+),.*", "\\1", labs) ),
+                       upper = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", labs) ))
+  bins_info$mean= rowMeans(bins_info)
+  bins_info$ix=as.numeric(rownames(bins_info))
+  
+  output= list(cut_vector= cut_vec, bins_info=bins_info)
+  #cut_vec= bin_names$new
+  #cut_vec= bin_names$lower
+  return(output)
+}
+
+
+```
+
+# Expected Number of Solutions
+
+Expected number of solutions for a knapsack problem with `r n` items. And weights and values are sampled from Dirichlet distributions:
+
+$$ (v_i,...,v_n) \sim Dir(\alpha, ... , \alpha ) $$
+$$ (w_i,...,w_n) \sim Dir(\beta, ... , \beta ) $$
+with $\alpha = 1$ and $\beta=1$.
+
+```{r}
+
+#Expected Number of Solutions (Analytical Calculation) 
+grid_size=100
+
+Np=seq(0,grid_size)
+Nc=seq(0,grid_size)
+
+#Calculates the expeted values and stores them in the prob array
+prob=array(-1,dim=c(length(Nc),length(Np)))
+for(npi in Np){
+  for(nci in Nc){
+    suma=0
+    for(s in seq(1,n)){
+      suma = suma + choose(n,s)*(1-pbeta(npi/grid_size, alpha*s, alpha*(n-s)))*pbeta(nci/grid_size,beta*s,beta*(n-s))
+    }
+    prob[nci+1,npi+1]=suma
+  }
+}
+#Reshapes the Array and assigns an nprofit and ncapacity to each expected value.
+eSol_data=melt(prob)
+names(eSol_data)=c('nCapacity','nProfit','ESol')
+eSol_data$nCapacity=eSol_data$nCapacity/grid_size
+eSol_data$nProfit=eSol_data$nProfit/grid_size
+
+```
+
+```{r}
+#Plots the expected number of solutions for given paramaters: n, alpha and beta
+p <- plot_ly(eSol_data,x=~nCapacity,y=~nProfit,z=~ESol, marker = list(color=~ESol, size=1) )%>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'nCapacity'),
+                      yaxis = list(title = 'nProfit'),
+                      zaxis = list(title = 'E(# of Solutions)')))
+p
+```
+
+
+# Constrainedness of Search (Gent, 96): Kappa
+
+```{r}
+##Calculate Kappa based on the analytical results
+bins = seq(0,100)/100
+
+#eSol_data$kappa = 1 - log(eSol_data$ESol,base =2)/log(2^n,base=2)
+eSol_data$kappa = 1 - log(eSol_data$ESol,base =2)/n
+
+eSol_data$nCapacity_bin = cut(eSol_data$nCapacity,breaks =bins,labels=FALSE)
+eSol_data$nProfit_bin = cut(eSol_data$nProfit,breaks =bins,labels=FALSE)
+
+eSol_data$lnCP= log( (eSol_data$nCapacity_bin/100) / (eSol_data$nProfit_bin/100) )
+
+```
+
+**$\kappa$ kappa plotted in Normalised capacity and profit space**
+
+```{r}
+p <- plot_ly(eSol_data,x=~nCapacity,y=~nProfit,z=~kappa, marker = list(color=~kappa, size=1) )%>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'nCapacity'),
+                      yaxis = list(title = 'nProfit'),
+                      zaxis = list(title = 'Kappa')))
+p
+```
+
+```{r}
+dataInput = eSol_data
+
+plo = ggplot(dataInput, aes(x=nCapacity, y=nProfit,z=kappa))+
+  geom_contour(aes(colour=stat(level)), bins=20)+
+  scale_colour_gradient(low = "lightgoldenrod2", high = "red")+
+  #guides(color = guide_legend(title = "Solvability probability"))+
+  theme(plot.title = element_text(hjust = 0.5))+
+  #ggtitle(paste0("Kappa parameter (n=",n,")"))+
+  theme_light() +
+  labs(x="Normalised Capacity",y="Normalised Profit")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),strip.text.x = element_blank(),
+        text = element_text(size=20))
+
+plo
+```
+
+
+
+## Kappa and Solvability (Phase Transition)
+Solvability based on actual simulations and solver results based on Gamma(1,1) sampling over the weights and values and the previous analytical results for n=15.
+
+```{r}
+#Get the standard Phase transition (Solvability) from the simulations
+pt_standard = read.csv("Simulations Output/gamma_sim/simulation_data_n15_gamma1_1.csv", stringsAsFactors = FALSE)
+  
+```
+
+
+```{r}
+p <- plot_ly(pt_standard,x=~nCapacity,y=~nProfit,z=~solvability, marker = list(color=~solvability, size=1) )%>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'nCapacity'),
+                      yaxis = list(title = 'nProfit'),
+                      zaxis = list(title = 'Solvability')))
+p
+```
+
+```{r}
+#Join Simulations and kappa 
+join_sim_ana = merge(pt_standard, eSol_data, by=c("nCapacity","nProfit"))
+
+cut_result=cut_jp(join_sim_ana$kappa,100)
+join_sim_ana$kappa_bin = cut_result$cut_vector$mean
+
+join_sim_ana_bined= join_sim_ana %>% group_by(kappa_bin) %>% summarise(solvability = mean(solvability))
+
+```
+
+```{r}
+plo = ggplot(join_sim_ana_bined, aes(x=kappa_bin, y=solvability))+
+  geom_point() +
+  theme_light() +
+  labs(x="Kappa",y="Solvability")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),strip.text.x = element_blank(),
+        text = element_text(size=20))
+  
+
+plo
+```
