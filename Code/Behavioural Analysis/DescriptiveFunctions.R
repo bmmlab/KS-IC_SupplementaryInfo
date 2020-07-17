@@ -2,6 +2,7 @@
 
 library(dplyr)
 library(reshape)
+library(adagio)
 
 se <- function(x) sqrt(var(x)/length(x))
 
@@ -343,7 +344,8 @@ timeSpentByNodeALL <- function(dataAllClicks,dataOpt){
   dataOpt$pID=as.character(dataOpt$pID)
   loopingParameters2 = dataOpt %>% dplyr::select(c(pID,block,trial)) %>% distinct()
   
-  loopingParameters=inner_join(loopingParameters1,loopingParameters2)
+  #loopingParameters=inner_join(loopingParameters1,loopingParameters2)
+  loopingParameters=full_join(loopingParameters1,loopingParameters2)
   
   timebyNodeData=data.frame()
   for( t in c(1:dim(loopingParameters)[1])){
@@ -383,6 +385,7 @@ timeSpentByNode <- function(pIDT,blockT,trialT,dataOptTrialInfo,clicksInfo){
   profitOpt = infoTrial$profitOpt
   phaseT= infoTrial$phaseT
   id=infoTrial$id
+  propgations = infoTrial$propagations
   
   #Filters Clicks by Participant, block and trial
   clicksTrial = clicksInfo %>% filter(pID==pIDT,block==blockT,trial==trialT)
@@ -393,6 +396,8 @@ timeSpentByNode <- function(pIDT,blockT,trialT,dataOptTrialInfo,clicksInfo){
   #Generates two empty rows that mark start and end of the trial (time=0 and time=SubmitTime (i.e. timeSpent))
   row=vector(mode="numeric",length=nColumns)
   clicksTrialExt = rbind(row,clicksTrial,row)
+  clicksTrialExt = as_tibble(clicksTrialExt)
+  
   clicksTrialExt$time[nClicks+2]=timeSpent
   
   #Calculates the time at each node by calculating diff() over time column
@@ -411,19 +416,30 @@ timeSpentByNode <- function(pIDT,blockT,trialT,dataOptTrialInfo,clicksInfo){
   clicksTrialExt$profitOpt = profitOpt
   clicksTrialExt$correct=correct
   clicksTrialExt = cbind(clicksTrialExt, timeSpentAtNode)
-  clicksTrialExt$eventNumber=rank(clicksTrialExt$time)
+  clicksTrialExt$eventNumber=rank(clicksTrialExt$nodeArrivalTime)
   clicksTrialExt$numberOfEvents=max(clicksTrialExt$eventNumber)
   clicksTrialExt$capacity=capacity
   clicksTrialExt$phaseT = phaseT
   clicksTrialExt$id = id
+  clicksTrialExt$propagations = propgations
+  clicksTrialExt$weights = list(ws)
+  clicksTrialExt$values = list(vs)
   
   #Generates the weight and value at each node
   nodeWeight=vector(mode="numeric",length=nClicks+1)
   nodeValue=vector(mode="numeric",length=nClicks+1)
+  is_terminal_node=vector(mode="numeric",length=nClicks+1)
+  selected_items_list = vector(mode="list",length=nClicks+1)
+  
   nodeWeightCounter=0
   nodeValueCounter=0
+  selected_items=rep(0,length(ws))
+  
   nodeWeight[1]=0
   nodeValue[1]=0
+  is_terminal_node[1]=FALSE
+  selected_items_list[[1]] = selected_items
+  
   
   for(i in c(2:(nClicks+1))){
     inOrOut=if (clicksTrialExt$In.1..Out.0.[i]==1) 1 else -1
@@ -431,9 +447,21 @@ timeSpentByNode <- function(pIDT,blockT,trialT,dataOptTrialInfo,clicksInfo){
     nodeValueCounter= vs[clicksTrialExt$item[i]]*inOrOut + nodeValueCounter
     nodeWeight[i] = nodeWeightCounter
     nodeValue[i] = nodeValueCounter
+    selected_items[clicksTrialExt$item[i]]=(inOrOut+1)/2 #item in=>1 /item out=>0
+    
+    #items selected
+    selected_items_list[[i]] = selected_items
+    #terminal node
+    is_terminal_node[i] = is_terminal_node_f(ws,selected_items, nodeWeightCounter, capacity)
   }
   
-  clicksTrialExt = cbind(clicksTrialExt, nodeWeight, nodeValue)
+  
+  clicksTrialExt = bind_cols(clicksTrialExt, 
+                             nodeWeight = nodeWeight, 
+                             nodeValue = nodeValue,  
+                             is_terminal_node = is_terminal_node,
+                             tibble(selected_items_list))
+  
   
   #Restrict analysis to those whose capacity constraint is being satisfied
   #clicksTrialExt = clicksTrialExt %>% filter(nodeWeight<=capacity)
@@ -535,6 +563,10 @@ w_v_perNode <- function(dataOptProp){
 #'
 #' @examples
 nBetterSolutions = function(timebyNodeData,allNodesList){
+  
+  timeByNode_noCap =timebyNodeData %>% filter(capSatisfied==FALSE)
+  timeByNode_noCap$nBetterSol = NA
+  
   timeByNode2=timebyNodeData %>% filter(capSatisfied==TRUE)
   timeByNode2$nBetterSol=0
   for (i in 1:dim(timeByNode2)[1]){
@@ -542,11 +574,194 @@ nBetterSolutions = function(timebyNodeData,allNodesList){
     id=timeByNode2$id[i]
     timeByNode2$nBetterSol[i]=dim(allNodesList[[id]] %>% filter(sum_v>value))[1]
   }
-  
+  timeByNode2 = bind_rows(timeByNode_noCap, timeByNode2)
   return(timeByNode2)
 }
 
 
+#' Determine whether a node is a terminal node
+#'
+#' @param weights_array e.g [12,23,33,44,55,66]
+#' @param selected_items  e.g. [0,1,0,1,0,0]
+#' @param nodeWeight e.g. 67
+#' @param capacity e.g 70
+#'
+#' @return Boolean: TRUE if the node is terminal 
+is_terminal_node_f = function(weights_array,selected_items,nodeWeight,capacity){
+  
+  if(nodeWeight>capacity){
+    is_terminal_node =FALSE
+  } else{
+    non_selected_items = abs(selected_items-1)
+    
+    non_selected_weights = weights_array*non_selected_items
+    non_selected_weights = non_selected_weights[non_selected_weights!=0]
+    
+    weight_to_reach_cap = capacity - nodeWeight
+    if (any(non_selected_weights <= weight_to_reach_cap)){
+      is_terminal_node = FALSE
+    }else{
+      is_terminal_node = TRUE
+    }
+    
+  }
+  return(is_terminal_node)
+}
 
+
+#' Extract a vector form  a comma delimited text
+#'
+#' @param character_input "1,2,3"
+#'
+#' @return c(1,2,3)
+#' @export
+#'
+#' @examples
+extract_vector =function(character_input){
+  vect = as.integer(strsplit(character_input,',')[[1]])
+  return(vect)
+}
+
+#' Extract a character from a vector and returns the vector in assending order
+#'
+#' @param character_input "1,2,3"
+#'
+#' @return c(1,2,3)
+#' @export
+#'
+#' @examples
+extract_vector =function(character_input){
+  
+  vect = as.integer(strsplit(character_input,',')[[1]])
+  vect = vect[order(vect)]
+  return(vect)
+}
+
+#' Order vector in increasing order
+#'
+#' @param vector_input 
+#'
+#' @return ordered vector
+order_vector  =function(vector_input){
+  vect = vector_input[order(vector_input)]
+  return(vect)
+}
+
+#' Add number of propagations for each Decision problem node.
+#' Matching might be approximate if no other better match option is found.
+#' 
+#' Matchin Criteria:
+#' weights == weights (exact)
+#' values == values (exact)
+#' capacity == capacity (as close as possible)
+#' dataNode$nodeValue == dataProp$profit (as close as possible)
+#'
+#' @param timebyNodeData Data by node: Each node represents a state in the optimisation task (set of clicks that had been done at a ceratin moment by the subject)
+#' @param decInstanceInfoAll Data containing propagations data (MZN data)
+#'
+#' @return A tibble that contains timebyNodeData with number of propagations and 2 other columns.
+#' cap_dif and val_diff shows the difference between the capacities matched and values matched, respectively.
+#'  
+#' @export
+#'
+#' @examples
+join_props_nodes = function(timebyNodeData,decInstanceInfoAll){
+  
+  dataNode = timebyNodeData %>% select(-propagations)
+  
+  data_prop_all = decInstanceInfoAll %>%
+    select(capacity,profit,weights, values,propagations_MZN)
+  
+  dataNode = as.tibble(dataNode)
+  data_prop_all = as.tibble(data_prop_all)
+  
+  # Convert weights/values strings to vector and order them in ascending order
+  data_prop_all$weights = lapply(data_prop_all$weights,
+                                 extract_vector)
+  data_prop_all$values= lapply(data_prop_all$values,
+                               extract_vector)
+  
+  #Create string version of ordered weights/values
+  data_prop_all$weights_str = str_remove_all(as.character(data_prop_all$weights),"[c() ]")
+  data_prop_all$values_str = str_remove_all(as.character(data_prop_all$values),"[c() ]")
+  
+  # Order weights/values in ascending order
+  dataNode$weights=lapply(dataNode$weights,
+                          order_vector)
+  dataNode$values=lapply(dataNode$values,
+                         order_vector)
+  
+  #Create string version of ordered weights/values
+  dataNode$weights_str = str_remove_all(as.character(dataNode$weights),"[c() ]")
+  dataNode$values_str = str_remove_all(as.character(dataNode$values),"[c() ]")
+  
+  
+  #Extract from the Propagations_data the propaagations of the nodes in dataNode.
+  # Matching might be not exact.
+  
+  #Matching criteria:
+  # weights == weights (exact)
+  # values == values (exact)
+  # capacity == capacity (as close as possible)
+  # dataNode$nodeValue == dataProp$profit (as close as possible)
+  
+  # This is done in a loop because other functions require to much memory and computer crashes
+  nodes= dim(dataNode)[1]
+  propagations = vector(mode="numeric", length=nodes)
+  val_diff = vector(mode="numeric", length=nodes)
+  cap_diff = vector(mode="numeric", length=nodes)
+  
+  for(l in c(1:nodes)){
+    d_work = data_prop_all %>%
+      filter(weights_str==dataNode$weights_str[l],
+             values_str==dataNode$values_str[l]) %>%
+      mutate(cap_diff =
+               abs(capacity-dataNode$capacity[l])) %>%
+      mutate(cap_diff_rank = min_rank(cap_diff)) %>%
+      mutate(val_diff =
+               abs(profit-dataNode$nodeValue[l])) %>%
+      mutate(val_diff_rank = min_rank(val_diff))
+    
+    d_work = d_work %>% filter(val_diff_rank==1,
+                               cap_diff_rank==1)
+    
+    if(dim(d_work)[1]!=1){
+      print(paste0("row ",l," was averaged over ",
+                   dim(d_work)[1]," propagations"))
+    }
+    
+    propagations[l] = mean(d_work$propagations_MZN)
+    val_diff[l] = mean(d_work$val_diff)
+    cap_diff[l] = mean(d_work$cap_diff)
+  }
+  
+  props = tibble( propagations = propagations,
+                  val_diff = val_diff,
+                  cap_diff = cap_diff)
+  
+  if( any(is.na(props$propagations)) ){
+    print("ERROR!: At least one Node wasn't matched with a propagations number")
+  }
+  
+  #Join the propagations data to the dataNode
+  dataOutput = bind_cols(dataNode,props)
+  
+  return(dataOutput)
+  
+}
+
+#Weight_Str to weight numeric
+#Applies to values as well
+str_to_numVec = function(weights_str){
+  weights_val=str_split(weights_str,",", simplify= TRUE) %>% as.numeric()
+  return(weights_val)
+}
+
+# Returns optimum value of knapsack problem using the adagio package
+find_opt_val = function(weights, values, cap){
+  #a =knapsack(dataInput$w_num[[i]], dataInput$v_num[[i]], dataInput$c[i])
+  solution = knapsack(weights, values, cap)
+  return(solution$profit)
+}
 
 
